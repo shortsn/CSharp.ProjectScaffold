@@ -132,7 +132,7 @@ Target "AssemblyInfo" (fun _ ->
               AssemblyInformationalVersion = informationalVersion
               AssemblyVersion = assemblyVersion
               OutputFileName = file })
-        gitCommand "" ("update-index --assume-unchanged " + file)
+        gitCommand "" (sprintf "update-index --assume-unchanged \"%s\"" file)
         )
       )
 )

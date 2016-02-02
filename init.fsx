@@ -209,13 +209,16 @@ let setRemote (name,url) workingDir =
   with
     | x -> traceException x
 
+
+//Clean up
+File.Delete "init.fsx"
+
 if isGitRepo () && wantGit then
   DeleteDir (Git.CommandHelper.findGitDir __SOURCE_DIRECTORY__).FullName
 
 if wantGit then
   Git.Repository.init __SOURCE_DIRECTORY__ false false
   givenOrigin |> Option.iter (fun url -> setRemote ("origin",url) __SOURCE_DIRECTORY__)
+  Git.Staging.StageAll __SOURCE_DIRECTORY__
   Git.Commit.Commit __SOURCE_DIRECTORY__ "initial Commit"
 
-//Clean up
-File.Delete "init.fsx"
