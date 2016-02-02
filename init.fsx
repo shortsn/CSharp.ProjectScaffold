@@ -88,7 +88,6 @@ vars.["##Description##"] <- promptFor "Description (longer description used by N
 vars.["##Author##"]      <- promptFor "Author"
 vars.["##Tags##"]        <- promptFor "Tags (separated by spaces)"
 vars.["##GitHome##"]     <- promptFor "Github User or Organization"
-vars.["##GitName##"]     <- promptFor "Github Project Name (leave blank to use Project Name)"
 
 let wantGit     = if inCI 
                     then false
@@ -211,21 +210,7 @@ let setRemote (name,url) workingDir =
   with
     | x -> traceException x
 
-let isRemote (name,url) value =
-  let remote = getRegEx <| sprintf @"^%s\s+%s\s+\(push\)$" name url
-  remote.IsMatch value
-
-let isScaffoldRemote = isRemote ("origin","http://github.com/fsprojects/ProjectScaffold.git")
-
-let hasScaffoldOrigin () =
-  try
-    match Git.CommandHelper.runGitCommand __SOURCE_DIRECTORY__ "remote -v" with
-    | true ,remotes,_ ->  remotes |> Seq.exists isScaffoldRemote
-    | false,_      ,_ ->  false
-  with
-    | _ -> false
-
-if isGitRepo () && hasScaffoldOrigin () then
+if isGitRepo () && wantGit then
   DeleteDir (Git.CommandHelper.findGitDir __SOURCE_DIRECTORY__).FullName
 
 if wantGit then
