@@ -1,0 +1,14 @@
+source https://nuget.org/api/v2
+
+group Build
+  source https://nuget.org/api/v2
+  
+  nuget FAKE
+  nuget docfx.msbuild
+  nuget ReportUnit
+  
+group Test
+  source https://nuget.org/api/v2
+  
+  nuget NUnit ~> 2
+  nuget NUnit.Runners ~> 2

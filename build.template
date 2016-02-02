@@ -1,0 +1,243 @@
+#r @"packages/build/FAKE/tools/FakeLib.dll"
+
+open Fake
+open Fake.Git
+open Fake.AssemblyInfoFile
+open Fake.ProcessHelper
+
+open System
+open System.IO
+open System.Text.RegularExpressions
+
+(*################################# Definitions #################################*)
+
+type GitVersionInfo = {
+  Major: int
+  Minor: int
+  Patch: int
+  CommitsAhead : int
+  IsPreRelease: bool
+  IsReleaseCandidate : bool
+  PreReleaseTag: string
+  PreReleaseVersion: int
+  Hash: string
+  Sha: string
+  Branch: string
+  LastReleaseTag: string
+}
+
+let RequiredEnvironVar name =
+  match environVarOrNone name with
+  | Some(envVar) -> envVar
+  | None -> sprintf "Die Umgebungsvariable '%s' enthält keinen Wert" name |> failwith
+
+let GetMatches input regex =
+  Regex.Matches(input, regex)
+  |> Seq.cast<Match>
+  |> Seq.map (fun m -> m.Value)
+
+let GetLog path filter format start_hash end_hash =
+  let ok,msg,error = runGitCommand "" (sprintf "--no-pager log --pretty=format:\"%s\" --no-merges %s..%s --grep=\"%s\" %s" format start_hash end_hash filter path)
+  if error <> "" then failwithf "git log failed: %s" error
+  msg
+
+let CreateAssemblyVersion info =
+  sprintf "%i.%i.%i.%i" info.Major info.Minor info.Patch info.CommitsAhead
+
+let CreateSemVer info =
+  if info.IsPreRelease
+    then (sprintf "%i.%i.%i-%s.%i" info.Major info.Minor info.Patch info.PreReleaseTag info.PreReleaseVersion)
+    else (sprintf "%i.%i.%i" info.Major info.Minor info.Patch)
+
+let CreateInformationalVersion info =
+  sprintf "%s+%i.Branch.%s.Sha.%s" (CreateSemVer info) info.CommitsAhead info.Branch info.Sha
+
+let GetVersionInfo tag_prefix =
+  let sha = getCurrentSHA1 ""
+  let last_tag = runSimpleGitCommand "" (sprintf "describe --tags --abbrev=0 HEAD --always --match \"%s[0-9]*.[0-9]*\"" tag_prefix)
+  let last_release_tag = if last_tag <> sha then last_tag else ""
+
+  let rc_version = environVarOrNone "ReleaseCandidate"
+  let is_release_candidate = rc_version <> None
+
+  let version_source =
+    if is_release_candidate
+      then
+        trace <| sprintf "Die Version explizit als ReleaseCandidate Überschrieben mit %s" rc_version.Value
+        rc_version.Value
+      else
+        last_release_tag
+
+  let rex_match = Regex.Match(version_source, "(?<version>\d+\.\d+(\.\d+)?)(-(?<prerelease>[0-9A-Za-z-]*)(\.(?<preversion>\d+))?)?")
+
+  let version = if rex_match.Success then Version.Parse rex_match.Groups.["version"].Value else new Version(0,0,0)
+
+  let pre_release_tag_group = rex_match.Groups.["prerelease"]
+  let pre_release_tag = if pre_release_tag_group.Success then pre_release_tag_group.Value else ""
+
+  let pre_release_version_group = rex_match.Groups.["preversion"]
+  let pre_release_version = if pre_release_version_group.Success then int pre_release_version_group.Value else 1
+
+  let commits_ahead =
+    if is_release_candidate
+      then 0
+      else if last_tag <> sha then revisionsBetween "" last_tag sha else int (runSimpleGitCommand "" "rev-list HEAD --count")
+
+  let branch = runSimpleGitCommand "" "rev-parse --abbrev-ref HEAD"
+
+  { Major = version.Major
+    Minor = version.Minor
+    Patch = if version.Build <> -1 then version.Build else 0
+    CommitsAhead = commits_ahead
+    IsPreRelease = pre_release_tag <> ""
+    IsReleaseCandidate = is_release_candidate
+    PreReleaseTag = pre_release_tag
+    PreReleaseVersion = pre_release_version
+    Hash = getCurrentHash()
+    Sha = sha
+    Branch = branch
+    LastReleaseTag = last_release_tag}
+
+(*################################# Assign Variables #################################*)
+
+let solutionFile  = "##ProjectName##.sln"
+let testAssemblies = "tests/**/bin/Release/*Tests*.dll"
+
+let versionInfo = GetVersionInfo "release/*"
+
+let dirBuildOutput = "_build.output"
+let buildConfiguration = "Release"
+
+(*################################# Print Variables #################################*)
+
+traceHeader "Variables"
+trace <| sprintf "%A" versionInfo
+traceHeader ""
+
+(*################################# Tasks #################################*)
+
+Target "AssemblyInfo" (fun _ ->
+  
+  let assemblyVersion = CreateAssemblyVersion versionInfo
+  let informationalVersion = CreateInformationalVersion versionInfo
+
+  trace <| sprintf "AssemblyVersion: %s" assemblyVersion
+  trace <| sprintf "AssemblyInformationalVersion: %s" informationalVersion
+  
+  !! ("src/**/*Info.cs")
+      |> Seq.iter(fun file ->
+       trace file
+       (ReplaceAssemblyInfoVersions (fun f ->
+          { f with
+              AssemblyInformationalVersion = informationalVersion
+              AssemblyVersion = assemblyVersion
+              OutputFileName = file })
+        gitCommand "" ("update-index --assume-unchanged " + file)
+        )
+      )
+)
+
+Target "CopyBinaries" (fun _ ->
+  !! "src/**/*.??proj"
+  -- "src/**/*.shproj"
+  |>  Seq.map (fun f -> ((System.IO.Path.GetDirectoryName f) </> "bin/Release", dirBuildOutput @@ "bin" </> (System.IO.Path.GetFileNameWithoutExtension f)))
+  |>  Seq.iter (fun (fromDir, toDir) -> CopyDir toDir fromDir (fun _ -> true))
+)
+
+Target "Clean" (fun _ ->
+  CleanDirs [dirBuildOutput]
+)
+
+Target "CleanDocs" (fun _ ->
+  CleanDirs [ dirBuildOutput @@ "docs"]
+)
+
+Target "Build" (fun _ ->
+  MSBuildDefaults  <- { MSBuildDefaults with Verbosity = Some(MSBuildVerbosity.Quiet) }
+  sprintf "building %s -> %s" solutionFile buildConfiguration |> traceHeader
+  MSBuild "" "Build" ["Configuration", buildConfiguration] [solutionFile] |> ignore
+)
+
+Target "RunTests" (fun _ ->
+  let RunNUnit testsOutputDir timeOut testAssemblies =
+    ensureDirectory testsOutputDir
+    testAssemblies
+      |> Seq.iter (fun file ->
+        trace <| sprintf " running tests -> %s" file
+        traceLine()
+        let name = filename file
+        let reportXml = testsOutputDir @@ (sprintf "%s_nunit-report.xml" name)
+        let nunitLog = testsOutputDir @@ (sprintf "%s_nunit-logs.txt" name)
+        let nunitErrors = testsOutputDir @@ (sprintf "%s_nunit-error.txt" name)
+        NUnit (fun p -> { p with ShowLabels = false; ErrorLevel = TestRunnerErrorLevel.Error; OutputFile = reportXml; Out = nunitLog; ErrorOutputFile = nunitErrors; DisableShadowCopy = true; TimeOut = timeOut; Domain = MultipleDomainModel; ProcessModel = MultipleProcessModel }) [file]
+      )
+
+  !! testAssemblies
+    |> RunNUnit (dirBuildOutput @@ "tests") (TimeSpan.FromMinutes 10.)
+)
+
+Target "NuGet" (fun _ ->
+  Paket.Pack(fun p ->
+      {p with
+          Version = (CreateAssemblyVersion versionInfo)
+          OutputPath = (dirBuildOutput @@ "nuget")
+          })
+)
+
+Target "NuGetPush" (fun _ ->
+  let nugetPublishUrl = environVarOrFail "nuget.PublishUrl"
+  let nugetApiKey = environVarOrFail "nuget.ApiKey"
+  
+  Paket.Push(fun p ->
+      {p with
+          WorkingDir = (dirBuildOutput @@ "nuget")
+          PublishUrl = nugetPublishUrl
+          ApiKey = nugetApiKey
+          DegreeOfParallelism = 1
+          EndPoint = "api/packages"
+          })
+)
+
+Target "GenerateDocs" (fun _ ->
+  traceHeader "GenerateDocs"
+  
+  let dirDocs = "docs"
+  
+  let result =
+    ExecProcess (fun info ->
+      info.FileName <- currentDirectory @@ "packages" @@ "build" @@ "docfx.msbuild" @@ "tools" @@ "docfx.exe"
+      info.Arguments <- sprintf "%s" (dirDocs @@ "docfx.json")
+      ) (TimeSpan.FromMinutes 5.)
+
+  if result <> 0 then failwithf "Error during docfx execution."
+  
+  let result =
+    ExecProcess (fun info ->
+      info.FileName <- currentDirectory @@ "packages" @@ "build" @@ "ReportUnit" @@ "tools" @@ "ReportUnit.exe"
+      info.Arguments <- sprintf "%s %s" (dirBuildOutput @@ "tests") (dirBuildOutput @@ "docs" @@ "testreport")
+      ) (TimeSpan.FromMinutes 5.)
+
+  if result <> 0 then failwithf "Error during ReportUnit execution."
+)
+
+Target "Publish" DoNothing
+Target "All" DoNothing
+
+"Clean"
+  ==> "AssemblyInfo"
+  ==> "Build"
+  ==> "CopyBinaries"
+  ==> "RunTests"
+  ==> "GenerateDocs"
+  ==> "All"
+
+"All"
+  ==> "NuGet"
+  =?> ("NuGetPush",  "master" = versionInfo.Branch)
+  ==> "Publish"
+
+"CleanDocs"
+  ==> "GenerateDocs"
+
+
+RunTargetOrDefault "All"
