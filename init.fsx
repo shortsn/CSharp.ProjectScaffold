@@ -216,6 +216,7 @@ if isGitRepo () && wantGit then
 if wantGit then
   Git.Repository.init __SOURCE_DIRECTORY__ false false
   givenOrigin |> Option.iter (fun url -> setRemote ("origin",url) __SOURCE_DIRECTORY__)
+  Git.Commit.Commit __SOURCE_DIRECTORY__ "initial Commit"
 
 //Clean up
 File.Delete "init.fsx"
