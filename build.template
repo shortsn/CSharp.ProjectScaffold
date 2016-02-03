@@ -72,18 +72,26 @@ let GetVersionInfo tag_prefix =
 
   let version = if rex_match.Success then Version.Parse rex_match.Groups.["version"].Value else new Version(0,0,0)
 
-  let pre_release_tag_group = rex_match.Groups.["prerelease"]
-  let pre_release_tag = if pre_release_tag_group.Success then pre_release_tag_group.Value else ""
-
-  let pre_release_version_group = rex_match.Groups.["preversion"]
-  let pre_release_version = if pre_release_version_group.Success then int pre_release_version_group.Value else 1
-
+  let branch = runSimpleGitCommand "" "rev-parse --abbrev-ref HEAD"
+  
   let commits_ahead =
     if is_release_candidate
       then 0
       else if last_tag <> sha then revisionsBetween "" last_tag sha else int (runSimpleGitCommand "" "rev-list HEAD --count")
 
-  let branch = runSimpleGitCommand "" "rev-parse --abbrev-ref HEAD"
+  let pre_release_tag_group = rex_match.Groups.["prerelease"]
+  let pre_release_tag = 
+    if pre_release_tag_group.Success 
+    then pre_release_tag_group.Value 
+    else
+      match branch with
+      | "master" -> ""
+      | "release" -> "rc"
+      | "develop" -> "beta"
+      | _ -> "alpha"
+
+  let pre_release_version_group = rex_match.Groups.["preversion"]
+  let pre_release_version = if pre_release_version_group.Success then int pre_release_version_group.Value else commits_ahead
 
   { Major = version.Major
     Minor = version.Minor
@@ -179,7 +187,7 @@ Target "RunTests" (fun _ ->
 Target "NuGet" (fun _ ->
   Paket.Pack(fun p ->
       {p with
-          Version = (CreateAssemblyVersion versionInfo)
+          Version = (CreateSemVer versionInfo)
           OutputPath = (dirBuildOutput @@ "nuget")
           })
 )
