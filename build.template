@@ -225,6 +225,13 @@ Target "GenerateDocs" (fun _ ->
   if result <> 0 then failwithf "Error during NUnit2Report execution."
 )
 
+Target "?" (fun _ ->
+  traceHeader "target summary"
+  trace ""
+  listTargets  ()
+  trace ""
+)
+
 Target "Publish" DoNothing
 Target "All" DoNothing
 
