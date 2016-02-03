@@ -211,13 +211,16 @@ Target "GenerateDocs" (fun _ ->
 
   if result <> 0 then failwithf "Error during docfx execution."
   
+  let files =
+    !! (dirBuildOutput @@ "tests" @@ "*_nunit-report.xml")
+      |> Seq.map (fun file -> (sprintf "\"%s\"" file))
+      |> String.concat ";"
+    
   let result =
     ExecProcess (fun info ->
-      info.FileName <- currentDirectory @@ "packages" @@ "build" @@ "ReportUnit" @@ "tools" @@ "ReportUnit.exe"
-      info.Arguments <- sprintf "%s %s" (dirBuildOutput @@ "tests") (dirBuildOutput @@ "docs" @@ "testreport")
+      info.FileName <- currentDirectory @@ "packages" @@ "build" @@ "NUnit2Report.Console.Runner" @@ "NUnit2Report.Console.exe"
+      info.Arguments <- sprintf "--frames --fileset=%s --todir \"%s\"" files (dirBuildOutput @@ "docs" @@ "testreport")
       ) (TimeSpan.FromMinutes 5.)
-
-  if result <> 0 then failwithf "Error during ReportUnit execution."
 )
 
 Target "Publish" DoNothing

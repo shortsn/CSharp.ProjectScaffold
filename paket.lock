@@ -6,7 +6,7 @@ NUGET
   specs:
     docfx.msbuild (1.4.2)
     FAKE (4.19.0)
-    ReportUnit (1.2.1)
+    NUnit2Report.Console.Runner (1.0.0)
 
 GROUP Test
 NUGET

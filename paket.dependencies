@@ -5,7 +5,7 @@ group Build
   
   nuget FAKE
   nuget docfx.msbuild
-  nuget ReportUnit
+  nuget NUnit2Report.Console.Runner 
   
 group Test
   source https://nuget.org/api/v2
