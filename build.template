@@ -221,6 +221,8 @@ Target "GenerateDocs" (fun _ ->
       info.FileName <- currentDirectory @@ "packages" @@ "build" @@ "NUnit2Report.Console.Runner" @@ "NUnit2Report.Console.exe"
       info.Arguments <- sprintf "--frames --fileset=%s --todir \"%s\"" files (dirBuildOutput @@ "docs" @@ "testreport")
       ) (TimeSpan.FromMinutes 5.)
+      
+  if result <> 0 then failwithf "Error during NUnit2Report execution."
 )
 
 Target "Publish" DoNothing
