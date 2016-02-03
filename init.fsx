@@ -4,6 +4,9 @@ open System
 open System.IO
 open System.Collections.Generic
 
+if (File.Exists Git.CommandHelper.gitPath) = false
+then  failwith "unable to locate git"
+
 // --------------------------------
 // init.fsx
 // This file is run the first time that you run build.sh/build.cmd
