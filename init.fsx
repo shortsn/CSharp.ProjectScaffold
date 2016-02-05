@@ -84,13 +84,20 @@ print """
 #
 """
 
+(*################################# Defaults #################################*)
+
+let defaultAuthor = "Author not set"
+let defaultDescription = "Description (longer description used by NuGet)"
+let defaultSummary = "Summary (a short description)"
+let defaultTags = "Tags (separated by spaces)"
+
+(*################################# Action #################################*)
+
 let vars = Dictionary<string,string option>()
 vars.["##ProjectName##"] <- promptForNoSpaces "Project Name (used for solution/project files)"
-vars.["##Summary##"]     <- promptFor "Summary (a short description)"
 vars.["##Description##"] <- promptFor "Description (longer description used by NuGet)"
 vars.["##Author##"]      <- promptFor "Author"
 vars.["##Tags##"]        <- promptFor "Tags (separated by spaces)"
-vars.["##GitHome##"]     <- promptFor "Github User or Organization"
 
 let wantGit     = if inCI 
                     then false
@@ -140,8 +147,15 @@ let replace t r (lines:seq<string>) =
       if s.Contains(t) then yield s.Replace(t, r)
       else yield s }
 
-let replaceWithVarOrMsg t n lines =
+let replaceWithVarOrDefault t n lines =
     replace t (vars.[t] |> function | None -> n | Some s -> s) lines
+    
+let replaceVariables input =
+  input
+  |> replace "##ProjectName##" projectName
+  |> replaceWithVarOrDefault "##Author##" defaultAuthor
+  |> replaceWithVarOrDefault "##Description##" defaultDescription
+  |> replaceWithVarOrDefault "##Tags##" defaultTags
 
 let overwrite file content = File.WriteAllLines(file, content |> Seq.toArray); file
 
@@ -153,11 +167,7 @@ let replaceContent file =
   |> replace (oldProjectGuid.ToUpperInvariant()) (projectGuid.ToUpperInvariant())
   |> replace (oldTestProjectGuid.ToUpperInvariant()) (testProjectGuid.ToUpperInvariant())
   |> replace solutionTemplateName projectName
-  |> replaceWithVarOrMsg "##Author##" "Author not set"
-  |> replaceWithVarOrMsg "##Description##" "Description not set"
-  |> replaceWithVarOrMsg "##Summary##" ""
-  |> replaceWithVarOrMsg "##Tags##" ""
-  |> replaceWithVarOrMsg "##GitHome##" "[github-user]"
+  |> replaceVariables
   |> overwrite file
   |> sprintf "%s updated"
 
@@ -182,12 +192,7 @@ let generate templatePath generatedFilePath =
 
   let newContent =
     File.ReadAllLines(templatePath) |> Array.toSeq
-    |> replace "##ProjectName##" projectName
-    |> replaceWithVarOrMsg "##Summary##" "Project has no summmary; update build.fsx"
-    |> replaceWithVarOrMsg "##Description##" "Project has no description; update build.fsx"
-    |> replaceWithVarOrMsg "##Author##" "Update Author in build.fsx"
-    |> replaceWithVarOrMsg "##Tags##" ""
-    |> replaceWithVarOrMsg "##GitHome##" "Update GitHome in build.fsx"
+    |> replaceVariables
 
   File.WriteAllLines(generatedFilePath, newContent)
   File.Delete(templatePath)
