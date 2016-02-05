@@ -46,7 +46,7 @@ let CreateAssemblyVersion info =
 
 let CreateSemVer info =
   if info.IsPreRelease
-    then (sprintf "%i.%i.%i-%s.%i" info.Major info.Minor info.Patch info.PreReleaseTag info.PreReleaseVersion)
+    then (sprintf "%i.%i.%i-%s%i" info.Major info.Minor info.Patch info.PreReleaseTag info.PreReleaseVersion)
     else (sprintf "%i.%i.%i" info.Major info.Minor info.Patch)
 
 let CreateInformationalVersion info =
@@ -105,6 +105,9 @@ let GetVersionInfo tag_prefix =
     Sha = sha
     Branch = branch
     LastReleaseTag = last_release_tag}
+    
+let IsPublishAllowed info =
+    (info.Branch = "master" && info.CommitsAhead = 0) || (info.Branch = "integration" && info.CommitsAhead <> 0)
 
 (*################################# Assign Variables #################################*)
 
@@ -114,6 +117,11 @@ let testAssemblies = "tests/**/bin/Release/*Tests*.dll"
 let versionInfo = GetVersionInfo "release/*"
 
 let dirBuildOutput = "_build.output"
+let dirTestsOutput = dirBuildOutput @@ "tests"
+let dirDocOutput = dirBuildOutput @@ "docs"
+let dirNuGetOutput = dirBuildOutput @@ "nuget"
+let dirBinOutput = dirBuildOutput @@ "bin"
+
 let buildConfiguration = "Release"
 
 (*################################# Print Variables #################################*)
@@ -133,16 +141,16 @@ Target "AssemblyInfo" (fun _ ->
   trace <| sprintf "AssemblyInformationalVersion: %s" informationalVersion
   
   !! ("src/**/*Info.cs")
-      |> Seq.iter(fun file ->
-       trace file
+    |> Seq.iter(fun file ->
        (ReplaceAssemblyInfoVersions (fun f ->
           { f with
               AssemblyInformationalVersion = informationalVersion
               AssemblyVersion = assemblyVersion
               OutputFileName = file })
-        gitCommand "" (sprintf "update-index --assume-unchanged \"%s\"" file)
+        
+        fireAndForgetGitCommand "" ("update-index --assume-unchanged " + file)
         )
-      )
+    )
 )
 
 Target "CopyBinaries" (fun _ ->
@@ -167,34 +175,41 @@ Target "Build" (fun _ ->
 )
 
 Target "RunTests" (fun _ ->
-  let RunNUnit testsOutputDir timeOut testAssemblies =
-    ensureDirectory testsOutputDir
-    testAssemblies
-      |> Seq.iter (fun file ->
-        trace <| sprintf " running tests -> %s" file
-        traceLine()
-        let name = filename file
-        let reportXml = testsOutputDir @@ (sprintf "%s_nunit-report.xml" name)
-        let nunitLog = testsOutputDir @@ (sprintf "%s_nunit-logs.txt" name)
-        let nunitErrors = testsOutputDir @@ (sprintf "%s_nunit-error.txt" name)
-        NUnit (fun p -> { p with ShowLabels = false; ErrorLevel = TestRunnerErrorLevel.Error; OutputFile = reportXml; Out = nunitLog; ErrorOutputFile = nunitErrors; DisableShadowCopy = true; TimeOut = timeOut; Domain = MultipleDomainModel; ProcessModel = MultipleProcessModel }) [file]
-      )
-
-  !! testAssemblies
-    |> RunNUnit (dirBuildOutput @@ "tests") (TimeSpan.FromMinutes 10.)
+  let tests = !! testAssemblies
+  if not (tests |> Seq.isEmpty)
+  then  
+    ensureDirectory dirTestsOutput
+    tests
+      |> NUnit (fun p -> 
+        { p with
+            ShowLabels = false
+            ErrorLevel = DontFailBuild
+            DisableShadowCopy = true
+            TimeOut = (TimeSpan.FromMinutes 10.)
+            Domain = MultipleDomainModel
+            ProcessModel = MultipleProcessModel
+            OutputFile = (dirTestsOutput @@ "nunit-report.xml")
+            })
+            
+    PublishArtifact dirTestsOutput
 )
 
 Target "NuGet" (fun _ ->
   Paket.Pack(fun p ->
       {p with
           Version = (CreateSemVer versionInfo)
-          OutputPath = (dirBuildOutput @@ "nuget")
+          OutputPath = dirNuGetOutput
           })
+          
+  PublishArtifact dirNuGetOutput
 )
 
 Target "NuGetPush" (fun _ ->
-  let nugetPublishUrl = environVarOrFail "nuget.PublishUrl"
-  let nugetApiKey = environVarOrFail "nuget.ApiKey"
+  if not (IsPublishAllowed versionInfo)
+  then failwithf "Vom aktuellen Stand darf keine keine Lieferung verteilt werden. %A" versionInfo
+  
+  let nugetPublishUrl = environVarOrFail "NuGetPublishUrl"
+  let nugetApiKey = environVarOrFail "nugetkey"
   
   Paket.Push(fun p ->
       {p with
@@ -219,18 +234,18 @@ Target "GenerateDocs" (fun _ ->
 
   if result <> 0 then failwithf "Error during docfx execution."
   
-  let files =
-    !! (dirBuildOutput @@ "tests" @@ "*_nunit-report.xml")
-      |> Seq.map (fun file -> (sprintf "\"%s\"" file))
-      |> String.concat ";"
-    
-  let result =
-    ExecProcess (fun info ->
-      info.FileName <- currentDirectory @@ "packages" @@ "build" @@ "NUnit2Report.Console.Runner" @@ "NUnit2Report.Console.exe"
-      info.Arguments <- sprintf "--frames --fileset=%s --todir \"%s\"" files (dirBuildOutput @@ "docs" @@ "testreport")
-      ) (TimeSpan.FromMinutes 5.)
-      
-  if result <> 0 then failwithf "Error during NUnit2Report execution."
+  let testResults = dirTestsOutput @@ "nunit-report.xml"
+  if (fileExists testResults)
+  then
+    let result =
+      ExecProcess (fun info ->
+        info.FileName <- currentDirectory @@ "packages" @@ "build" @@ "NUnit2Report.Console.Runner" @@ "NUnit2Report.Console.exe"
+        info.Arguments <- sprintf "--fileset=\"%s\" --todir \"%s\"" testResults (dirDocOutput @@ "testreport")
+        ) (TimeSpan.FromMinutes 15.)
+        
+    if result <> 0 then failwithf "Error during NUnit2Report execution."
+  
+  PublishArtifact dirDocOutput
 )
 
 Target "?" (fun _ ->
@@ -253,7 +268,7 @@ Target "All" DoNothing
 
 "All"
   ==> "NuGet"
-  =?> ("NuGetPush",  "master" = versionInfo.Branch)
+  =?> ("NuGetPush", isLocalBuild || (IsPublishAllowed versionInfo))
   ==> "Publish"
 
 "CleanDocs"
