@@ -1,7 +1,6 @@
 #r @"packages/build/FAKE/tools/FakeLib.dll"
 
 open Fake
-open Fake.Git
 open Fake.AssemblyInfoFile
 open Fake.ProcessHelper
 
@@ -38,8 +37,8 @@ let CreateInformationalVersion info =
   sprintf "%s+%i.Branch.%s.Sha.%s" (CreateSemVer info) info.CommitsAhead info.Branch info.Sha
 
 let GetVersionInfo tag_prefix =
-  let sha = getCurrentSHA1 ""
-  let last_tag = runSimpleGitCommand "" (sprintf "describe --tags --abbrev=0 HEAD --always --match \"%s[0-9]*.[0-9]*\"" tag_prefix)
+  let sha = Git.Information.getCurrentSHA1 ""
+  let last_tag = Git.CommandHelper.runSimpleGitCommand "" (sprintf "describe --tags --abbrev=0 HEAD --always --match \"%s[0-9]*.[0-9]*\"" tag_prefix)
   let last_release_tag = if last_tag <> sha then last_tag else ""
 
   let version_source =
@@ -54,12 +53,11 @@ let GetVersionInfo tag_prefix =
 
   let version = if rex_match.Success then Version.Parse rex_match.Groups.["version"].Value else new Version(0,0,0)
 
-  let branch = runSimpleGitCommand "" "rev-parse --abbrev-ref HEAD"
-  
+  let branch = Git.CommandHelper.runSimpleGitCommand "" "rev-parse --abbrev-ref HEAD"
   let commits_ahead =
     if is_release_candidate
       then 0
-      else if last_tag <> sha then revisionsBetween "" last_tag sha else int (runSimpleGitCommand "" "rev-list HEAD --count")
+      else if last_tag <> sha then Git.Branches.revisionsBetween "" last_tag sha else int (Git.CommandHelper.runSimpleGitCommand "" "rev-list HEAD --count")
 
   let pre_release_tag_group = rex_match.Groups.["prerelease"]
   let pre_release_tag = 
@@ -84,7 +82,7 @@ let GetVersionInfo tag_prefix =
     IsReleaseCandidate = is_release_candidate
     PreReleaseTag = pre_release_tag
     PreReleaseVersion = pre_release_version
-    Hash = getCurrentHash()
+    Hash = Git.Information.getCurrentHash()
     Sha = sha
     Branch = branch
     LastReleaseTag = last_release_tag}
