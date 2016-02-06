@@ -15,10 +15,8 @@ type GitVersionInfo = {
   Minor: int
   Patch: int
   CommitsAhead : int
-  IsPreRelease: bool
   IsReleaseCandidate : bool
-  PreReleaseTag: string
-  PreReleaseVersion: int
+  PreReleaseVersion: (string*int) option
   Hash: string
   Sha: string
   Branch: string
@@ -29,9 +27,9 @@ let CreateAssemblyVersion info =
   sprintf "%i.%i.%i.%i" info.Major info.Minor info.Patch info.CommitsAhead
 
 let CreateSemVer info =
-  if info.IsPreRelease
-    then (sprintf "%i.%i.%i-%s%i" info.Major info.Minor info.Patch info.PreReleaseTag info.PreReleaseVersion)
-    else (sprintf "%i.%i.%i" info.Major info.Minor info.Patch)
+  match info.PreReleaseVersion with
+  | Some (tag, version) -> sprintf "%i.%i.%i-%s%i" info.Major info.Minor info.Patch tag version
+  | None -> sprintf "%i.%i.%i" info.Major info.Minor info.Patch
 
 let CreateInformationalVersion info =
   sprintf "%s+%i.Branch.%s.Sha.%s" (CreateSemVer info) info.CommitsAhead info.Branch info.Sha
@@ -61,22 +59,26 @@ let GetVersionInfo tag_prefix =
       
   let isReleaseCandidate = pre_release_tag = Some("rc")
       
-  let commits_ahead =
+  let commitsAhead =
     if isReleaseCandidate
       then 0
       else if last_tag <> sha then Git.Branches.revisionsBetween "" last_tag sha else int (Git.CommandHelper.runSimpleGitCommand "" "rev-list HEAD --count")
 
-  let pre_release_version_group = rex_match.Groups.["preversion"]
-  let pre_release_version = if pre_release_version_group.Success then int pre_release_version_group.Value else commits_ahead
+  let preReleaseVersion =
+    match pre_release_tag with
+    | Some tag -> 
+      let pre_release_version_group = rex_match.Groups.["preversion"]
+      if pre_release_version_group.Success 
+      then Some(tag, int pre_release_version_group.Value) 
+      else Some(tag, commitsAhead)
+    | None -> None
 
   { Major = version.Major
     Minor = version.Minor
     Patch = if version.Build <> -1 then version.Build else 0
-    CommitsAhead = commits_ahead
-    IsPreRelease = pre_release_tag.IsSome
+    CommitsAhead = commitsAhead
     IsReleaseCandidate = isReleaseCandidate
-    PreReleaseTag = pre_release_tag |> function | None -> "" | Some s -> s
-    PreReleaseVersion = pre_release_version
+    PreReleaseVersion =  preReleaseVersion
     Hash = Git.Information.getCurrentHash()
     Sha = sha
     Branch = branch
@@ -124,7 +126,7 @@ Target "AssemblyInfo" (fun _ ->
               AssemblyVersion = assemblyVersion
               OutputFileName = file })
         
-        fireAndForgetGitCommand "" ("update-index --assume-unchanged " + file)
+        Git.CommandHelper.fireAndForgetGitCommand "" ("update-index --assume-unchanged " + file)
         )
     )
 )
