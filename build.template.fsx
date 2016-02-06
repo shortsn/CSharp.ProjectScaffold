@@ -26,21 +26,6 @@ type GitVersionInfo = {
   LastReleaseTag: string
 }
 
-let RequiredEnvironVar name =
-  match environVarOrNone name with
-  | Some(envVar) -> envVar
-  | None -> sprintf "Die Umgebungsvariable '%s' enthält keinen Wert" name |> failwith
-
-let GetMatches input regex =
-  Regex.Matches(input, regex)
-  |> Seq.cast<Match>
-  |> Seq.map (fun m -> m.Value)
-
-let GetLog path filter format start_hash end_hash =
-  let ok,msg,error = runGitCommand "" (sprintf "--no-pager log --pretty=format:\"%s\" --no-merges %s..%s --grep=\"%s\" %s" format start_hash end_hash filter path)
-  if error <> "" then failwithf "git log failed: %s" error
-  msg
-
 let CreateAssemblyVersion info =
   sprintf "%i.%i.%i.%i" info.Major info.Minor info.Patch info.CommitsAhead
 
@@ -56,9 +41,6 @@ let GetVersionInfo tag_prefix =
   let sha = getCurrentSHA1 ""
   let last_tag = runSimpleGitCommand "" (sprintf "describe --tags --abbrev=0 HEAD --always --match \"%s[0-9]*.[0-9]*\"" tag_prefix)
   let last_release_tag = if last_tag <> sha then last_tag else ""
-
-  let rc_version = environVarOrNone "ReleaseCandidate"
-  let is_release_candidate = rc_version <> None
 
   let version_source =
     if is_release_candidate
@@ -86,6 +68,7 @@ let GetVersionInfo tag_prefix =
     else
       match branch with
       | "master" -> ""
+      | "hotfix" -> "rc"
       | "release" -> "rc"
       | "develop" -> "beta"
       | _ -> "alpha"
