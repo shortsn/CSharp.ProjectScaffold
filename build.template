@@ -57,42 +57,48 @@ let GetVersionInfo tagPrefix =
       then Git.Branches.revisionsBetween "" lastReleaseTag.Value sha 
       else int (Git.CommandHelper.runSimpleGitCommand "" "rev-list HEAD --count")
   
-  let version, preReleaseTag, preReleaseVersion = 
-    match lastReleaseTag with
-    | Some tag ->
-      let rex_match = Regex.Match(tag, "(?<version>\d+\.\d+(\.\d+)?)(-(?<prerelease>[0-9A-Za-z-]*)(\.(?<preversion>\d+))?)?")
-      if rex_match.Success 
-        then 
-          let version = Version.Parse rex_match.Groups.["version"].Value
-          let preReleaseTagGroup = rex_match.Groups.["prerelease"]
-          let preReleaseTag =
-            if preReleaseTagGroup.Success 
-              then Some(preReleaseTagGroup.Value) 
-              else (GetPreReleaseTag branch)
-          let preReleaseVersion =
-            let preReleaseVersionGroup = rex_match.Groups.["preversion"]
-            if preReleaseVersionGroup.Success
-              then int preReleaseVersionGroup.Value
-              else commitsAhead
-          version, preReleaseTag, preReleaseVersion
-        else new Version(0,0,0), (GetPreReleaseTag branch), commitsAhead
-    | None -> new Version(0,0,0), (GetPreReleaseTag branch), commitsAhead
+  let preReleaseTag = GetPreReleaseTag branch
   
-  let isReleaseCandidate = preReleaseTag = Some("rc")
-  { Major = version.Major
-    Minor = version.Minor
-    Patch = if version.Build <> -1 then version.Build else 0
-    CommitsAhead = commitsAhead
-    IsReleaseCandidate = isReleaseCandidate
-    PreReleaseVersion = 
-      if preReleaseTag.IsSome 
-        then Some(preReleaseTag.Value, preReleaseVersion) 
-        else None
-    Hash = Git.Information.getCurrentHash()
-    Sha = sha
-    Branch = branch
-    LastReleaseTag = lastReleaseTag}
-
+  let versioInfo =
+    { Major = 0
+      Minor = 0
+      Patch = 0
+      CommitsAhead = commitsAhead
+      IsReleaseCandidate = preReleaseTag = Some("rc")
+      PreReleaseVersion = preReleaseTag |> Option.fold (fun _ tag -> Some(tag, commitsAhead)) None
+      Hash = Git.Information.getCurrentHash()
+      Sha = sha
+      Branch = branch
+      LastReleaseTag = lastReleaseTag }
+  
+  match lastReleaseTag with
+  | Some tag ->
+    let versionRegEx = Regex.Match(tag, "(?<version>\d+\.\d+(\.\d+)?)(-(?<prerelease>[0-9A-Za-z-]*)(\.(?<preversion>\d+))?)?")
+    if versionRegEx.Success 
+      then 
+        let version = Version.Parse versionRegEx.Groups.["version"].Value
+        let preReleaseTagGroup = versionRegEx.Groups.["prerelease"]
+        let preReleaseVersion =
+          if preReleaseTagGroup.Success 
+            then 
+              let preReleaseVersion =
+                let preReleaseVersionGroup = versionRegEx.Groups.["preversion"]
+                if preReleaseVersionGroup.Success
+                  then int preReleaseVersionGroup.Value
+                  else commitsAhead
+              Some(preReleaseTagGroup.Value, preReleaseVersion) 
+            else versioInfo.PreReleaseVersion
+        
+        { versioInfo with 
+            Major = version.Major
+            Minor = version.Minor
+            Patch = version.Revision
+            IsReleaseCandidate = preReleaseVersion |> Option.fold (fun _ (tag,version) -> tag = "rc") false
+            PreReleaseVersion = preReleaseVersion
+        }
+      else versioInfo
+  | None -> versioInfo
+  
 (*################################# Assign Variables #################################*)
 
 let solutionFile  = "##ProjectName##.sln"
