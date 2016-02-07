@@ -57,19 +57,26 @@ let GetVersionInfo tagPrefix =
       then Git.Branches.revisionsBetween "" lastReleaseTag.Value sha 
       else int (Git.CommandHelper.runSimpleGitCommand "" "rev-list HEAD --count")
   
-  let preReleaseTag = GetPreReleaseTag branch
-  
   let versioInfo =
     { Major = 0
       Minor = 0
       Patch = 0
       CommitsAhead = commitsAhead
-      IsReleaseCandidate = preReleaseTag = Some("rc")
-      PreReleaseVersion = preReleaseTag |> Option.fold (fun _ tag -> Some(tag, commitsAhead)) None
+      IsReleaseCandidate = false
+      PreReleaseVersion = None
       Hash = Git.Information.getCurrentHash()
       Sha = sha
       Branch = branch
       LastReleaseTag = lastReleaseTag }
+    |> (fun version -> 
+      let preReleaseTag = GetPreReleaseTag branch
+      match preReleaseTag with
+      | Some tag -> 
+        { version with
+            IsReleaseCandidate = tag = "rc"
+            PreReleaseVersion = Some(tag, commitsAhead) }
+      | None -> version
+      )
   
   match lastReleaseTag with
   | Some tag ->
