@@ -68,7 +68,7 @@ let ApplyBranchConvention info =
 let ApplyConvention info =
   match info.LatestReleaseTag with
   | Some tag ->
-    let versionRegEx = Regex.Match(tag, "(?<version>\d+\.\d+(\.\d+)?)(-(?<prerelease>[0-9A-Za-z-]*)(\.(?<preversion>\d+))?)?")
+    let versionRegEx = Regex.Match(tag, "(?<version>\d+\.\d+(\.\d+)?)(-(?<prerelease>[A-Za-z-]*)((?<preversion>\d+))?)?")
     if versionRegEx.Success
       then
         let version = Version.Parse versionRegEx.Groups.["version"].Value
