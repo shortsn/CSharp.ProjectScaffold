@@ -92,7 +92,7 @@ let GetVersionInfo tagPrefix =
         { versioInfo with 
             Major = version.Major
             Minor = version.Minor
-            Patch = version.Revision
+            Patch = if version.Build < 0 then 0 else version.Build
             IsReleaseCandidate = preReleaseVersion |> Option.fold (fun _ (tag,version) -> tag = "rc") false
             PreReleaseVersion = preReleaseVersion
         }
