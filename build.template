@@ -24,10 +24,13 @@ type GitVersionInfo = {
 }
 
 let BuildAssemblyVersion info =
-  match info.Branch with
-    | "release" -> new Version(info.Major, info.Minor + 1, 0, 0)
-    | "hotfix" -> new Version(info.Major, info.Minor, info.Patch + 1, 0)
-    | _ -> new Version(info.Major, info.Minor, info.Patch, info.CommitsAhead)
+  if info.CommitsAhead = 0
+  then new Version(info.Major, info.Minor, info.Patch, info.CommitsAhead)
+  else
+    match info.Branch with
+      | "release" -> new Version(info.Major, info.Minor + 1, 0, 0)
+      | "hotfix" -> new Version(info.Major, info.Minor, info.Patch + 1, 0)
+      | _ -> new Version(info.Major, info.Minor, info.Patch, info.CommitsAhead)
 
 let CreateAssemblyVersion info =
   let assemblyVersion = BuildAssemblyVersion info
