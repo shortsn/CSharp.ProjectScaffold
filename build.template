@@ -68,10 +68,10 @@ let GetVersionInfo tagPrefix =
       Sha = sha
       Branch = branch
       LastReleaseTag = lastReleaseTag }
-    |> (fun version -> 
+    |> (fun version ->
       let preReleaseTag = GetPreReleaseTag branch
       match preReleaseTag with
-      | Some tag -> 
+      | Some tag ->
         { version with
             IsReleaseCandidate = tag = "rc"
             PreReleaseVersion = Some(tag, commitsAhead) }
@@ -81,13 +81,13 @@ let GetVersionInfo tagPrefix =
   match lastReleaseTag with
   | Some tag ->
     let versionRegEx = Regex.Match(tag, "(?<version>\d+\.\d+(\.\d+)?)(-(?<prerelease>[0-9A-Za-z-]*)(\.(?<preversion>\d+))?)?")
-    if versionRegEx.Success 
-      then 
+    if versionRegEx.Success
+      then
         let version = Version.Parse versionRegEx.Groups.["version"].Value
         let preReleaseTagGroup = versionRegEx.Groups.["prerelease"]
         let preReleaseVersion =
-          if preReleaseTagGroup.Success 
-            then 
+          if preReleaseTagGroup.Success
+            then
               let preReleaseVersion =
                 let preReleaseVersionGroup = versionRegEx.Groups.["preversion"]
                 if preReleaseVersionGroup.Success
@@ -95,12 +95,11 @@ let GetVersionInfo tagPrefix =
                   else commitsAhead
               Some(preReleaseTagGroup.Value, preReleaseVersion) 
             else versioInfo.PreReleaseVersion
-        
-        { versioInfo with 
+        { versioInfo with
             Major = version.Major
             Minor = version.Minor
             Patch = if version.Build < 0 then 0 else version.Build
-            IsReleaseCandidate = preReleaseVersion |> Option.fold (fun _ (tag,version) -> tag = "rc") false
+            IsReleaseCandidate = preReleaseVersion |> Option.fold (fun _ (tag, version) -> tag = "rc") false
             PreReleaseVersion = preReleaseVersion
         }
       else versioInfo
