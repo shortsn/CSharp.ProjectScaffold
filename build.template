@@ -35,7 +35,7 @@ let CreateInformationalVersion info =
   sprintf "%s+%i.Branch.%s.Sha.%s" (CreateSemVer info) info.CommitsAhead info.Branch info.Sha
   
 let IsPublishAllowed info =
-    (info.Branch = "master" && info.CommitsAhead = 0) || (info.Branch = "integration" && info.CommitsAhead <> 0)
+  (info.Branch = "master" && info.CommitsAhead = 0) || (info.Branch = "integration" && info.CommitsAhead <> 0)
 
 let GetPreReleaseTag branch =
   match branch with
@@ -56,7 +56,6 @@ let GetNextVersionIfReleaseCandidate info =
     | _ -> info
 
 let GetVersionInfo tagPrefix =
-
   let sha = Git.Information.getCurrentSHA1 ""
   let lastTag = Git.CommandHelper.runSimpleGitCommand "" (sprintf "describe --tags --abbrev=0 HEAD --always --match \"%s[0-9]*.[0-9]*\"" tagPrefix)
   let lastReleaseTag = if lastTag <> sha then Some(lastTag) else None
@@ -117,7 +116,6 @@ let GetVersionInfo tagPrefix =
         else versioInfo
     | None -> versioInfo
     )
-  |> GetNextVersionIfReleaseCandidate
   
 (*################################# Assign Variables #################################*)
 
