@@ -20,16 +20,24 @@ type GitVersionInfo = {
   Hash: string
   Sha: string
   Branch: string
-  LastReleaseTag: string option
+  LatestReleaseTag: string option
 }
 
+let BuildAssemblyVersion info =
+  match info.Branch with
+    | "release" -> new Version(info.Major, info.Minor + 1, 0, 0)
+    | "hotfix" -> new Version(info.Major, info.Minor, info.Patch + 1, 0)
+    | _ -> new Version(info.Major, info.Minor, info.Patch, info.CommitsAhead)
+
 let CreateAssemblyVersion info =
-  sprintf "%i.%i.%i.%i" info.Major info.Minor info.Patch info.CommitsAhead
+  let assemblyVersion = BuildAssemblyVersion info
+  sprintf "%i.%i.%i.%i" assemblyVersion.Major assemblyVersion.Minor assemblyVersion.Build assemblyVersion.Revision
 
 let CreateSemVer info =
+  let assemblyVersion = BuildAssemblyVersion info
   match info.PreReleaseVersion with
-  | Some (tag, version) -> sprintf "%i.%i.%i-%s%i" info.Major info.Minor info.Patch tag version
-  | None -> sprintf "%i.%i.%i" info.Major info.Minor info.Patch
+  | Some (tag, version) -> sprintf "%i.%i.%i-%s%i" assemblyVersion.Major assemblyVersion.Minor assemblyVersion.Build tag version
+  | None -> sprintf "%i.%i.%i" assemblyVersion.Major assemblyVersion.Minor assemblyVersion.Build
 
 let CreateInformationalVersion info =
   sprintf "%s+%i.Branch.%s.Sha.%s" (CreateSemVer info) info.CommitsAhead info.Branch info.Sha
@@ -44,29 +52,55 @@ let GetPreReleaseTag branch =
       | "release" -> Some("rc")
       | "develop" -> Some("beta")
       | _ -> Some("alpha")
-      
-let GetNextVersionIfReleaseCandidate info =
-  match info.Branch with
-    | "release" ->
-      { info with
-          Minor = info.Minor + 1
-          Patch = 0 }
-    | "hotfix" ->
-      { info with Patch = info.Patch + 1 }
-    | _ -> info
+
+let ApplyBranchConvention info =
+  let preReleaseTag = GetPreReleaseTag info.Branch
+  match preReleaseTag with
+  | Some tag ->
+    { info with
+        IsReleaseCandidate = tag = "rc"
+        PreReleaseVersion = Some(tag, info.CommitsAhead) }
+  | None -> info
+  
+let ApplyConvention info =
+  match info.LatestReleaseTag with
+  | Some tag ->
+    let versionRegEx = Regex.Match(tag, "(?<version>\d+\.\d+(\.\d+)?)(-(?<prerelease>[0-9A-Za-z-]*)(\.(?<preversion>\d+))?)?")
+    if versionRegEx.Success
+      then
+        let version = Version.Parse versionRegEx.Groups.["version"].Value
+        let preReleaseTagGroup = versionRegEx.Groups.["prerelease"]
+        let preReleaseVersion =
+          if preReleaseTagGroup.Success
+            then
+              let preReleaseVersion =
+                let preReleaseVersionGroup = versionRegEx.Groups.["preversion"]
+                if preReleaseVersionGroup.Success
+                  then int preReleaseVersionGroup.Value
+                  else info.CommitsAhead
+              Some(preReleaseTagGroup.Value, preReleaseVersion) 
+            else info.PreReleaseVersion
+        { info with
+            Major = version.Major
+            Minor = version.Minor
+            Patch = if version.Build < 0 then 0 else version.Build
+            IsReleaseCandidate = preReleaseVersion |> Option.fold (fun _ (tag, version) -> tag = "rc") false
+            PreReleaseVersion = preReleaseVersion
+        }
+      else ApplyBranchConvention info
+  | None -> ApplyBranchConvention info
 
 let GetVersionInfo tagPrefix =
   let sha = Git.Information.getCurrentSHA1 ""
-  let lastTag = Git.CommandHelper.runSimpleGitCommand "" (sprintf "describe --tags --abbrev=0 HEAD --always --match \"%s[0-9]*.[0-9]*\"" tagPrefix)
-  let lastReleaseTag = if lastTag <> sha then Some(lastTag) else None
+  let latestReleaseTag = 
+    Git.CommandHelper.runSimpleGitCommand "" (sprintf "describe --tags --abbrev=0 HEAD --always --match \"%s[0-9]*.[0-9]*\"" tagPrefix)
+    |> (fun result -> if result <> sha then Some(result) else None)
   let branch = Git.CommandHelper.runSimpleGitCommand "" "rev-parse --abbrev-ref HEAD"
-  
   let commitsAhead =
-    if lastReleaseTag.IsSome 
-      then Git.Branches.revisionsBetween "" lastReleaseTag.Value sha 
+    if latestReleaseTag.IsSome 
+      then Git.Branches.revisionsBetween "" latestReleaseTag.Value sha 
       else int (Git.CommandHelper.runSimpleGitCommand "" "rev-list HEAD --count")
   
-  // default Version
   { Major = 0
     Minor = 0
     Patch = 0
@@ -76,46 +110,8 @@ let GetVersionInfo tagPrefix =
     Hash = Git.Information.getCurrentHash()
     Sha = sha
     Branch = branch
-    LastReleaseTag = lastReleaseTag }
-  |> (fun versioInfo ->
-    // convention based prerelease
-    let preReleaseTag = GetPreReleaseTag branch
-    match preReleaseTag with
-    | Some tag ->
-      { versioInfo with
-          IsReleaseCandidate = tag = "rc"
-          PreReleaseVersion = Some(tag, commitsAhead) }
-    | None -> versioInfo
-    )
-  |> (fun versioInfo ->
-    // apply tag based version
-    match lastReleaseTag with
-    | Some tag ->
-      let versionRegEx = Regex.Match(tag, "(?<version>\d+\.\d+(\.\d+)?)(-(?<prerelease>[0-9A-Za-z-]*)(\.(?<preversion>\d+))?)?")
-      if versionRegEx.Success
-        then
-          let version = Version.Parse versionRegEx.Groups.["version"].Value
-          let preReleaseTagGroup = versionRegEx.Groups.["prerelease"]
-          let preReleaseVersion =
-            if preReleaseTagGroup.Success
-              then
-                let preReleaseVersion =
-                  let preReleaseVersionGroup = versionRegEx.Groups.["preversion"]
-                  if preReleaseVersionGroup.Success
-                    then int preReleaseVersionGroup.Value
-                    else commitsAhead
-                Some(preReleaseTagGroup.Value, preReleaseVersion) 
-              else versioInfo.PreReleaseVersion
-          { versioInfo with
-              Major = version.Major
-              Minor = version.Minor
-              Patch = if version.Build < 0 then 0 else version.Build
-              IsReleaseCandidate = preReleaseVersion |> Option.fold (fun _ (tag, version) -> tag = "rc") false
-              PreReleaseVersion = preReleaseVersion
-          }
-        else versioInfo
-    | None -> versioInfo
-    )
+    LatestReleaseTag = latestReleaseTag }
+  |> ApplyConvention
   
 (*################################# Assign Variables #################################*)
 
